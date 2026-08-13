@@ -208,7 +208,10 @@ footer.dash-footer{ text-align:center; font-size:11.5px; color:var(--text-second
 .informe-week-card{ border:1px solid var(--border-soft); border-radius:8px; padding:8px; }
 .informe-week-title{ font-size:11px; font-weight:700; color:var(--text-secondary); text-transform:uppercase; margin-bottom:4px; text-align:center; }
 .informe-week-chart{ height:110px; position:relative; }
-.informe-print-only{ display:none; }
+/* Off-screen but LAID OUT (real width/height) so Chart.js can render the print copies at
+   full size. display:none would give 0x0 canvases and the charts would print blank. */
+.informe-print-only{ position:fixed; top:0; left:0; width:1080px; height:1px; overflow:hidden; opacity:0; pointer-events:none; z-index:-9999; }
+.informe-print-only img.print-chart-img{ display:block; width:100%; height:auto; }
 .informe-metric-section-title{ background:var(--femsa-black); color:#fff; font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:.6px; padding:8px 14px; border-radius:6px; margin:20px 0 12px 0; }
 .informe-kmgal-print-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:14px; }
 @media (max-width:800px){ .informe-kmgal-print-grid{ grid-template-columns:1fr; } }
@@ -222,12 +225,24 @@ footer.dash-footer{ text-align:center; font-size:11.5px; color:var(--text-second
   body.printing-informe .wrap{ max-width:100%; padding:0; }
   body.printing-informe .informe-page{ box-shadow:none; padding:10px; }
   body.printing-informe .informe-weekly-grid{ grid-template-columns:repeat(4, 1fr); }
-  body.printing-informe .informe-grid-3col{ grid-template-columns:1fr 1fr 1fr !important; }
+  body.printing-informe .informe-grid-3col{ grid-template-columns:1fr !important; }
+  body.printing-informe, body.printing-informe .wrap, html.printing-informe-html{ background:#ffffff !important; }
+  body.printing-informe .informe-page{ background:#ffffff !important; }
   body.printing-informe #informe-page-interactive{ display:none !important; }
-  body.printing-informe .informe-print-only{ display:block !important; }
+  body.printing-informe .informe-print-only{
+    position:static !important; width:auto !important; height:auto !important;
+    overflow:visible !important; opacity:1 !important; z-index:auto !important; display:block !important;
+  }
   body.printing-informe .informe-page{ page-break-after:always; }
   body.printing-informe .informe-page:last-child{ page-break-after:auto; }
+  /* the report spans several pages — don't let the generic .section rule collapse it */
+  body.printing-informe #tab-informe{ page-break-inside:auto !important; }
+  /* scroll boxes must show all their rows on paper, not the first 480px */
+  body.printing-informe .table-scroll{ max-height:none !important; overflow:visible !important; border:none; }
+  body.printing-informe .informe-panel, body.printing-informe .informe-kmgal-print-grid > *{ page-break-inside:avoid; }
+  body.printing-informe{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 }
+@page{ size:letter portrait; margin:12mm; }
 </style>
 </head>
 <body>
@@ -1138,6 +1153,8 @@ function populateInformeBlock(data, metric, ids){
       { label:'Mediana del mes', data:overlayArr, borderColor:'#9D2736', borderWidth:3, pointRadius:4, pointBackgroundColor:'#9D2736', fill:false, tension:0.15 }
     ]},
     options:{ responsive:true, maintainAspectRatio:false,
+      animation: ids.print ? false : undefined,
+      devicePixelRatio: ids.print ? 2 : undefined,
       interaction:{ mode:'index', intersect:false },
       plugins:{ legend:{display:false}, datalabels:{display:false},
         tooltip:{ itemSort:(a,b)=>{
@@ -1173,6 +1190,8 @@ function populateInformeBlock(data, metric, ids){
       data:{ labels, datasets:[{ data:values, borderColor:'#999999', borderWidth:1.5, pointRadius:4,
         pointBackgroundColor:colors, pointBorderColor:colors, fill:false, tension:0.2 }] },
       options:{ responsive:true, maintainAspectRatio:false, layout:{ padding:{ top:16 } },
+        animation: ids.print ? false : undefined,
+        devicePixelRatio: ids.print ? 2 : undefined,
         plugins:{ legend:{display:false},
           datalabels:{ anchor:'end', align:'top', offset:4, color:'#333', font:{size:9,weight:700}, formatter:(v)=>abbrev(v) },
           tooltip:{ callbacks:{ label:(c)=> fmtM(c.parsed.y) } } },
@@ -1305,10 +1324,14 @@ function renderInforme(){
   // 1) Interactive view (single metric toggle)
   populateInformeBlock(data, informeMetric, INTERACTIVE_IDS);
   document.getElementById('informe-kmgal-interactive').innerHTML = buildKmGalContent();
+}
 
-  // 2) Print-only view: both metrics, always, plus km/gal top10 (per user request the PDF keeps both units)
-  const dataGalones = DATA.informe[informeCedi][informeMonth]['galones'];
-  const dataGasto = DATA.informe[informeCedi][informeMonth]['gasto'];
+// Builds and populates the print-only content (both metrics + km/gal). Must run while the
+// container is actually visible (display:block), otherwise Chart.js creates 0-size canvases
+// and the charts render blank in the exported PDF.
+function renderInformePrintOnly(){
+  const dataGalones = DATA.informe[informeCedi] && DATA.informe[informeCedi][informeMonth] && DATA.informe[informeCedi][informeMonth]['galones'];
+  const dataGasto = DATA.informe[informeCedi] && DATA.informe[informeCedi][informeMonth] && DATA.informe[informeCedi][informeMonth]['gasto'];
   let printHtml = '';
   if(dataGalones) printHtml += buildPrintPageSkeleton('galones');
   if(dataGasto) printHtml += buildPrintPageSkeleton('gasto');
@@ -1320,7 +1343,7 @@ function renderInforme(){
       periodo:'informe-print-galones-periodo', ndays:'informe-print-galones-ndays', avg:'informe-print-galones-avg',
       cv:'informe-print-galones-cv', cvNoSun:'informe-print-galones-cvnosun', max:'informe-print-galones-max', min:'informe-print-galones-min',
       goalsTable:'informe-print-galones-goals', rangeBar:'informe-print-galones-rangebar', agpCanvas:'informe-print-galones-agpchart',
-      agpChartKey:'informePrintGalonesAgp', agpTable:'informe-print-galones-agptable', weeklyGrid:'informe-print-galones-weekgrid'
+      agpChartKey:'informePrintGalonesAgp', agpTable:'informe-print-galones-agptable', weeklyGrid:'informe-print-galones-weekgrid', print:true
     });
   }
   if(dataGasto){
@@ -1328,16 +1351,55 @@ function renderInforme(){
       periodo:'informe-print-gasto-periodo', ndays:'informe-print-gasto-ndays', avg:'informe-print-gasto-avg',
       cv:'informe-print-gasto-cv', cvNoSun:'informe-print-gasto-cvnosun', max:'informe-print-gasto-max', min:'informe-print-gasto-min',
       goalsTable:'informe-print-gasto-goals', rangeBar:'informe-print-gasto-rangebar', agpCanvas:'informe-print-gasto-agpchart',
-      agpChartKey:'informePrintGastoAgp', agpTable:'informe-print-gasto-agptable', weeklyGrid:'informe-print-gasto-weekgrid'
+      agpChartKey:'informePrintGastoAgp', agpTable:'informe-print-gasto-agptable', weeklyGrid:'informe-print-gasto-weekgrid', print:true
     });
   }
 }
 
-function printInforme(){
+// Turns every print-copy canvas into a static PNG <img>. Canvases can come out blank in the
+// print output (the browser re-lays them out for paper and Chart.js has no chance to repaint);
+// an image always prints exactly what was on screen.
+function rasterizePrintCharts(){
+  const container = document.getElementById('informe-print-only');
+  const imgs = [];
+  container.querySelectorAll('canvas').forEach(cv=>{
+    let url;
+    try{ url = cv.toDataURL('image/png'); }catch(e){ return; }
+    const img = document.createElement('img');
+    img.className = 'print-chart-img';
+    img.src = url;
+    const box = cv.parentElement;
+    box.style.height = 'auto';   // wrapper had a fixed px height for the canvas
+    box.replaceChild(img, cv);
+    imgs.push(img);
+  });
+  Object.keys(charts)
+    .filter(k=> k.indexOf('informePrint')===0 || k.indexOf('informe-print-')===0)
+    .forEach(destroyChart);
+  return imgs;
+}
+
+async function printInforme(){
+  const btn = document.getElementById('informe-download-btn');
+  const label = btn.textContent;
+  btn.textContent = 'Preparando PDF…'; btn.disabled = true;
   document.body.classList.add('printing-informe');
+  // The print container is off-screen but laid out at 1080px, so the charts get a real size here.
+  renderInformePrintOnly();
+  await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+  const imgs = rasterizePrintCharts();
+  await Promise.all(imgs.map(img=> img.complete ? Promise.resolve()
+    : (img.decode ? img.decode().catch(()=>{}) : new Promise(res=>{ img.onload = img.onerror = res; }))));
+  btn.textContent = label; btn.disabled = false;
   window.print();
 }
-window.addEventListener('afterprint', ()=>{ document.body.classList.remove('printing-informe'); });
+window.addEventListener('afterprint', ()=>{
+  document.body.classList.remove('printing-informe');
+  Object.keys(charts)
+    .filter(k=> k.indexOf('informePrint')===0 || k.indexOf('informe-print-')===0)
+    .forEach(destroyChart);
+  document.getElementById('informe-print-only').innerHTML = '';
+});
 
 document.querySelectorAll('#informe-metric-pills button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
